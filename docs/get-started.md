@@ -15,26 +15,7 @@ YouTube 视频转录工具，支持自动语音识别和说话人分离。
 
 ## 快速开始
 
-### 方式一：使用 uv tool install（推荐）
-
-```bash
-# 全局安装（只需一次）
-cd src && uv tool install -e .
-
-# 之后可以直接运行
-yt-summarize-vedio "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# 查看帮助
-yt-summarize-vedio --help
-```
-
-### 方式二：使用虚拟环境
-
-```bash
-cd src && uv venv && source .venv/bin/activate && uv pip install -e .
-```
-
-### 2. 系统依赖
+### 1. 系统依赖
 
 - **ffmpeg** - 音频处理（必须）
   ```bash
@@ -49,34 +30,55 @@ cd src && uv venv && source .venv/bin/activate && uv pip install -e .
   - 程序会自动检测 GPU，有 GPU 时自动使用
   - NVIDIA GPU 需要 CUDA 驱动支持（最低 CUDA 11.8）
   - 没有 GPU 时自动回退到 CPU 模式
-  - 支持大多数现代 NVIDIA 显卡（Maxwell 架构及以上，如 GTX 900 系列、RTX 系列等）
-  - Pascal 老旧架构（GTX 1080/1070/1060 等）自动使用低精度模式
 
-  ```bash
-  # 检测 CUDA 是否可用
-  cd src && uv run python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
-  ```
-
-### 2.1 首次使用准备（模型下载）
-
-模型会在首次运行时自动下载，无需手动下载。
-
-确保网络通畅（能访问 huggingface.co）。首次运行后模型会缓存到 `~/.cache/huggingface/` 目录。
-
-> 注意：说话人分离功能（`--diarize`）使用的 pyannote 模型需要在 [HuggingFace](https://huggingface.co/pyannote/speaker-diarization-3.1) 申请访问权限。
-
-### 3. 基本用法
+### 2. 首次使用准备（模型下载）
 
 ```bash
-cd src
+uv tool install huggingface_hub
 
-# 使用 uv 运行
-uv run python -m yt_cli "https://www.youtube.com/watch?v=VIDEO_ID"
+# 登录 HuggingFace（需要先申请访问权限）
+hf auth login
 
-uv run python -m yt_cli "https://www.youtube.com/watch?v=43kikAbL8u8"  -o ./output.txt
+# 下载 Whisper 模型（默认使用 turbo） ， Faster-Whisper 模型（必选）
+hf download --local-dir ~/.cache/huggingface/hub/openai/whisper-turbo openai/whisper-turbo
+
+# 访问 https://huggingface.co/pyannote/speaker-diarization-3.1 点击 "Request access"
+# 再下载 pyannote 说话人分离模型（可选）
+hf download pyannote/speaker-diarization-3.1 --local-dir ~/.cache/huggingface/hub/models--pyannote--speaker-diarization-3.1
+
 ```
 
-### 4. 命令行参数
+###  3 使用虚拟环境运行
+
+```bash
+cd src && uv venv && source .venv/bin/activate && uv pip install -e .
+
+cd src && uv run python -m yt_cli "https://www.youtube.com/watch?v=43kikAbL8u8"
+```
+
+### 3. 安装使用
+
+```bash
+
+# 安装
+cd src && uv tool install -e .
+
+# 默认，禁用说话人分离， 只使用 --whisper-model 模型进行本地转录
+yt-summarize-vedio "https://www.youtube.com/watch?v=43kikAbL8u8"
+
+# 指定语言
+yt-summarize-vedio "URL" --language en
+
+# 指定输出路径
+yt-summarize-vedio "URL" -o ./my_transcript.txt
+
+# 启用说话人分离， 在使用 --whisper-model 模型进行本地转录后，再使用 --diarize-model 模型进行分离
+yt-summarize-vedio --diarize "https://www.youtube.com/watch?v=43kikAbL8u8"
+
+
+```
+
+### 5. 命令行参数
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
@@ -90,48 +92,12 @@ uv run python -m yt_cli "https://www.youtube.com/watch?v=43kikAbL8u8"  -o ./outp
 | `--log-level` | 日志级别 | `INFO` |
 | `-v, --verbose` | 详细输出 | - |
 
-- **Whisper 模型选项**: tiny, base, small, medium, large, turbo (默认 turbo，精度和速度平衡)
-- **说话人分离模型**: 支持 pyannote 官方模型，默认 `pyannote/speaker-diarization-3.1`
-
-### 5. 使用示例
-
-```bash
-# 使用 uv tool install 安装后（推荐）
-yt-summarize-vedio "https://www.youtube.com/watch?v=43kikAbL8u8" --no-diarize
-
-# 指定语言
-yt-summarize-vedio "URL" --language en
-
-# 指定输出路径
-yt-summarize-vedio "URL" -o ./my_transcript.txt
-
-# 启用说话人分离
-yt-summarize-vedio "URL" --diarize
-
-# 使用更小的模型
-yt-summarize-vedio "URL" --whisper-model tiny
-
-# 或者使用虚拟环境
-cd src
-uv run python -m yt_cli "URL"
-```
-
-# 使用更小的 Whisper 模型（更快）
-uv run python -m yt_cli "URL" --whisper-model tiny
-
-# 使用不同的说话人分离模型
-uv run python -m yt_cli "URL" --diarize-model pyannote/speaker-diarization-3.1
-
-# 详细日志输出
-uv run python -m yt_cli "URL" -v
-
-# 运行测试
-cd src && uv venv && source .venv/bin/activate && PYTHONPATH=. python -m pytest ../tests/test_transcribe.py -v
-```
+- **Whisper 模型选项**: tiny, base, small, medium, large, turbo (默认 turbo)
+- **说话人分离模型**: 支持 pyannote 官方模型
 
 ## 输出格式
 
-### 默认输出（无说话人分离）
+### 默认输出（无说话人分离），他根据一句话的长度自动分段
 
 ```
 [00:00] 在硅谷采访100个有意思的人
@@ -149,14 +115,25 @@ cd src && uv venv && source .venv/bin/activate && PYTHONPATH=. python -m pytest 
 
 ## 常见问题
 
-### Q: 模型首次下载失败？
+### Q: 403 Forbidden 错误？
 
-A: 确保网络通畅，可以访问 huggingface.co。如果访问困难，可能需要配置代理。
+A: pyannote/speaker-diarization-3.1 是 gated model，需要：
+1. 访问 https://hf.co/pyannote/speaker-diarization-3.1 申请访问权限
+2. 审核通过后使用 `--no-diarize` 或确保已登录 HuggingFace
 
 ### Q: 转录速度慢？
 
-A: 可以使用更小的 Whisper 模型：
+A: 使用更小的 Whisper 模型：
 ```bash
-cd src
-uv run python -m yt_cli "URL" --whisper-model tiny
+yt-summarize-vedio "URL" --whisper-model tiny
+```
+
+### Q: 模型下载失败？
+
+A: 确保能访问 huggingface.co，或配置代理。
+
+## 运行测试
+
+```bash
+cd src && uv venv && source .venv/bin/activate && PYTHONPATH=. python -m pytest ../tests/test_transcribe.py -v
 ```
