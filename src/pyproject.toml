@@ -1,24 +1,19 @@
 [project]
-name = "yt-summarize-vedio"
+name = "yt-vedio-sum"
 version = "0.2.0"
-description = "YouTube video transcription with speaker diarization"
+description = "YouTube video transcription tool"
 requires-python = ">=3.10"
 dependencies = [
     "yt-dlp>=2024.8.6",
     "faster-whisper>=1.0.0",
     "torch>=2.0.0",
-    "pyannote.audio>=3.0.0",
-    "pyannote.pipeline>=3.0.0",
-    "pyannote.database>=5.1.0",
-    "torchmetrics>=0.11.0",
-    "pytorch-lightning>=2.0.0",
 ]
 
 [project.scripts]
-yt-summarize-vedio = "yt_cli:main"
+yt-vedio-sum = "yt_cli:main"
 
 [tool.setuptools]
-py-modules = ["yt_utils", "yt_transcribe", "yt_diarize", "yt_cli"]
+py-modules = ["yt_utils", "yt_transcribe", "yt_cli"]
 
 [build-system]
 requires = ["setuptools>=61.0"]

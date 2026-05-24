@@ -16,3 +16,6 @@ __pycache__/
 # Local config
 .env
 .env.local
+
+src/output/
+output/
