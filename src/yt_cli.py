@@ -83,6 +83,12 @@ def parse_args():
         help="详细输出 (等价于 --log-level DEBUG)"
     )
 
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="强制使用 CPU，不使用 GPU"
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -254,7 +260,8 @@ def main():
 
     try:
         logger.info("🎙️ 开始转录...")
-        transcriber = WhisperTranscriber(model_size=args.whisper_model)
+        device = "cpu" if args.cpu else None
+        transcriber = WhisperTranscriber(model_size=args.whisper_model, device=device)
 
         transcription_segments = []
         for seg in transcriber.transcribe(audio_path, language=args.language):
