@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """YouTube 视频转录 CLI 主入口"""
-import sys
 import os
+# 必须最先设置环境变量
+os.environ["LD_LIBRARY_PATH"] = "/usr/local/cuda/targets/x86_64-linux/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+
+import sys
 import argparse
 import logging
+import ctypes
+import ctypes.util
 from pathlib import Path
 from datetime import datetime
+
+# 预加载 libcublas 以避免运行时找不到
+try:
+    ctypes.CDLL("libcublas.so.12", mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
 
 # 添加当前目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,17 +69,6 @@ def parse_args():
         choices=["tiny", "base", "small", "medium", "large", "turbo"],
         help="Whisper 模型大小 (默认: turbo)"
     )
-    parser.add_argument(
-        "--diarize",
-        action="store_true",
-        default=False,
-        help="(已废弃) 说话人分离功能已移除"
-    )
-    parser.add_argument(
-        "--diarize-model",
-        default="pyannote/speaker-diarization-3.1",
-        help="(已废弃) 说话人分离功能已移除"
-    )
 
     parser.add_argument(
         "--log-level",
@@ -84,9 +84,18 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--cpu",
-        action="store_true",
-        help="强制使用 CPU，不使用 GPU"
+        "--chip",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "gpu"],
+        help="计算设备: auto(自动)/cpu/CPU/gpu/GPU (默认: auto)"
+    )
+
+    parser.add_argument(
+        "--proxy",
+        type=str,
+        default=None,
+        help="代理服务器地址 (如: http://127.0.0.1:7890, socks5://127.0.0.1:1080)"
     )
 
     args = parser.parse_args()
@@ -101,7 +110,7 @@ def parse_args():
     return args
 
 
-def validate_url(url: str) -> bool:
+def validate_url(url: str, proxy: str = None) -> bool:
     """验证 URL 是否可访问"""
     import re
 
@@ -117,8 +126,11 @@ def validate_url(url: str) -> bool:
             # 使用 yt-dlp 验证 URL 是否可访问
             import subprocess
             try:
+                cmd = ["yt-dlp", "--skip-download", "--flat-playlist", url]
+                if proxy:
+                    cmd.extend(["--proxy", proxy])
                 result = subprocess.run(
-                    ["yt-dlp", "--skip-download", "--flat-playlist", url],
+                    cmd,
                     capture_output=True,
                     text=True,
                     timeout=30
@@ -151,7 +163,7 @@ def is_local_audio_file(path: str) -> bool:
 
 
 @retry(max_attempts=3, delay=2.0, backoff=2.0)
-def download_audio(url: str, output_path: str) -> str:
+def download_audio(url: str, output_path: str, proxy: str = None) -> str:
     """下载 YouTube 音频"""
     import subprocess
 
@@ -162,8 +174,10 @@ def download_audio(url: str, output_path: str) -> str:
         "-x", "--audio-format", "wav",
         "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
         "-o", output_path.replace(".opus", ".wav"),
-        url
     ]
+    if proxy:
+        cmd.extend(["--proxy", proxy])
+    cmd.append(url)
     output_path = output_path.replace(".opus", ".wav")
 
     result = subprocess.run(
@@ -214,12 +228,21 @@ def main():
 
     args = parse_args()
 
+    # 设置代理
+    proxy = args.proxy
+    if proxy:
+        os.environ["HTTP_PROXY"] = proxy
+        os.environ["HTTPS_PROXY"] = proxy
+        os.environ["http_proxy"] = proxy
+        os.environ["https_proxy"] = proxy
+        logger.info(f"🌐 代理: {proxy}")
+
     # 先检查是否是本地文件（避免对本地路径调用 validate_url）
     if is_local_audio_file(args.url):
         setup_logging(level=args.log_level)
     else:
         setup_logging(level=args.log_level)
-        if not validate_url(args.url):
+        if not validate_url(args.url, proxy=proxy):
             sys.exit(1)
 
     logger.info("🎬 YouTube 视频转录工具启动")
@@ -250,17 +273,23 @@ def main():
             audio_path = output_audio
         logger.info(f"📂 使用本地音频文件: {audio_path} ({file_size:.1f} MB)")
         source_type = f"本地文件: {input_path}"
-    elif not validate_url(input_path):
+    elif not validate_url(input_path, proxy=proxy):
         logger.error("❌ 无效的 YouTube URL")
         sys.exit(1)
     else:
         # 下载 YouTube 音频
-        audio_path = download_audio(input_path, output_audio)
+        audio_path = download_audio(input_path, output_audio, proxy=proxy)
         source_type = f"YouTube URL: {input_path}"
 
     try:
         logger.info("🎙️ 开始转录...")
-        device = "cpu" if args.cpu else None
+        # 根据 --chip 参数设置设备
+        if args.chip == "cpu":
+            device = "cpu"
+        elif args.chip == "gpu":
+            device = "cuda"
+        else:  # auto
+            device = None  # 自动检测
         transcriber = WhisperTranscriber(model_size=args.whisper_model, device=device)
 
         transcription_segments = []
