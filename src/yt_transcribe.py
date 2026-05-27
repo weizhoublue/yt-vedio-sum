@@ -4,6 +4,9 @@ import logging
 from typing import Generator, Dict, Any, Optional
 from dataclasses import dataclass
 
+# 添加 CUDA 库路径
+os.environ["LD_LIBRARY_PATH"] = "/usr/local/cuda/targets/x86_64-linux/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+
 # 延迟导入 torch，允许在没有 torch 的环境中运行测试
 try:
     import torch
@@ -70,6 +73,10 @@ class WhisperTranscriber:
         is_pascal = any(x in gpu_name for x in ['1060', '1070', '1080', 'P4', 'P100', 'PASCAL'])
 
         if is_pascal:
+            # Tesla P4 (sm_6.1) 不支持 int8_float16，回退到 int8
+            if "P4" in gpu_name:
+                logger.warning("⚠️  [架构警告] Tesla P4 不支持 int8_float16，使用 int8")
+                return "int8"
             logger.warning("⚠️  [架构警告] 该显卡属于 Pascal 老旧架构，FP16 算力受限")
             return "int8_float16"
 
@@ -85,10 +92,19 @@ class WhisperTranscriber:
             return model
         except Exception as e:
             logger.error(f"❌ [模型加载失败] {e}")
-            # 降级处理
+            # 降级处理：尝试不同精度
             if self.compute_type == "float16":
                 logger.info("🔄 [降级重试] 尝试 int8_float16 精度")
                 return WhisperModel(self.model_size, device=self.device, compute_type="int8_float16")
+            elif self.compute_type == "int8_float16":
+                logger.info("🔄 [降级重试] 尝试 int8 精度")
+                return WhisperModel(self.model_size, device=self.device, compute_type="int8")
+            # 如果 GPU 加载失败，尝试回退到 CPU
+            if self.device == "cuda":
+                logger.warning("⚠️  [降级] GPU 加载失败，尝试回退到 CPU")
+                self.device = "cpu"
+                self.compute_type = "int8"
+                return self._load_model()
             raise
 
     def transcribe(
@@ -115,11 +131,23 @@ class WhisperTranscriber:
         # 确定语言参数
         lang_param = None if language == "auto" else language
 
-        segments, info = self.model.transcribe(
-            audio_path,
-            language=lang_param,
-            beam_size=beam_size
-        )
+        try:
+            segments, info = self.model.transcribe(
+                audio_path,
+                language=lang_param,
+                beam_size=beam_size
+            )
+        except Exception as e:
+            # GPU 运行时失败，回退到 CPU
+            if self.device == "cuda":
+                logger.warning(f"⚠️  [降级] GPU 转录失败 ({e})，回退到 CPU")
+                self.device = "cpu"
+                self.compute_type = "int8"
+                self.model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+                logger.info(f"⚙️  [重新加载] 设备: {self.device}, 精度: {self.compute_type}")
+                # 直接递归调用并返回结果
+                yield from self.transcribe(audio_path, language, beam_size)
+                return
 
         logger.info(f"🌐 [语言检测] {info.language} (置信度: {info.language_probability:.2%})")
 
